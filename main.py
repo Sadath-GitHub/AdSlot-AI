@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import anthropic
+import uvicorn
 import whisper
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -139,3 +140,35 @@ async def find_ad_timestamps_endpoint(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import socket
+
+    port = int(os.environ.get("PORT", 5003))
+
+    # Get local IP address
+    def get_local_ip():
+        try:
+            # Connect to a remote server to get local IP
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except:
+            return "0.0.0.0"
+
+    local_ip = get_local_ip()
+
+    print("\n" + "=" * 60)
+    print("🚀 AdSlot AI...")
+    print("=" * 60)
+    print(f"�� Server running on:")
+    print(f"   • Local:   http://127.0.0.1:{port}")
+    print(f"   • Network: http://{local_ip}:{port}")
+    print(f"   • Docs:    http://127.0.0.1:{port}/docs")
+    print(f"   • Health:  http://127.0.0.1:{port}/health")
+    print("=" * 60)
+    print("Press CTRL+C to stop the server")
+    print("=" * 60 + "\n")
+
+    uvicorn.run(app, host="0.0.0.0", port=port)
