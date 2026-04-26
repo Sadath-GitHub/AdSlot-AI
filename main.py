@@ -25,7 +25,7 @@ print("Loading Whisper model...")
 whisper_model = whisper.load_model("base")
 print("Whisper model loaded.")
 
-claude_client = anthropic.Anthropic(api_key="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")
+claude_client = anthropic.Anthropic(api_key="YOUR_API_KEY")
 
 
 def transcribe_video(video_path: str) -> list[dict]:
