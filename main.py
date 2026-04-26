@@ -26,7 +26,7 @@ print("Loading Whisper model...")
 whisper_model = whisper.load_model("base")
 print("Whisper model loaded.")
 
-claude_client = anthropic.Anthropic(api_key="YOUR_API_KEY")
+claude_client = anthropic.Anthropic()
 
 
 def transcribe_video(video_path: str) -> list[dict]:
@@ -141,34 +141,5 @@ async def find_ad_timestamps_endpoint(
 def health():
     return {"status": "ok"}
 
-
 if __name__ == "__main__":
-    import socket
-
-    port = int(os.environ.get("PORT", 5003))
-
-    # Get local IP address
-    def get_local_ip():
-        try:
-            # Connect to a remote server to get local IP
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
-        except:
-            return "0.0.0.0"
-
-    local_ip = get_local_ip()
-
-    print("\n" + "=" * 60)
-    print("🚀 AdSlot AI...")
-    print("=" * 60)
-    print(f"�� Server running on:")
-    print(f"   • Local:   http://127.0.0.1:{port}")
-    print(f"   • Network: http://{local_ip}:{port}")
-    print(f"   • Docs:    http://127.0.0.1:{port}/docs")
-    print(f"   • Health:  http://127.0.0.1:{port}/health")
-    print("=" * 60)
-    print("Press CTRL+C to stop the server")
-    print("=" * 60 + "\n")
-
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
