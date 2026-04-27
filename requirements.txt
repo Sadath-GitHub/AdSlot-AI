@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
-openai-whisper
+faster-whisper
 anthropic
 python-multipart
+python-dotenv
