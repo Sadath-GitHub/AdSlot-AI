@@ -1,15 +1,18 @@
 import os
 import json
 import tempfile
-import anthropic
 import uvicorn
-import whisper
+import anthropic
+from faster_whisper import WhisperModel
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+load_dotenv()
+
 app = FastAPI(
-    title="AdSlot AI",
+    title="Ad Timestamp Finder API",
     description="Upload a video and get the best timestamps to place ads using AI",
     version="1.0.0"
 )
@@ -23,42 +26,54 @@ app.add_middleware(
 )
 
 print("Loading Whisper model...")
-whisper_model = whisper.load_model("base")
+whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
 print("Whisper model loaded.")
 
 claude_client = anthropic.Anthropic()
 
 
 def transcribe_video(video_path: str) -> list[dict]:
-    result = whisper_model.transcribe(video_path)
+    segments, _ = whisper_model.transcribe(video_path)
     return [
         {
-            "start": round(seg["start"], 2),
-            "end": round(seg["end"], 2),
-            "text": seg["text"].strip()
+            "start": round(seg.start, 2),
+            "end": round(seg.end, 2),
+            "text": seg.text.strip()
         }
-        for seg in result["segments"]
+        for seg in segments
     ]
 
 
-def find_ad_timestamps(segments: list[dict], video_duration: float, ad_count) -> dict:
+def format_timestamp(seconds: float) -> str:
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def find_ad_timestamps(segments: list[dict], video_duration: float, ad_count: int = 3) -> dict:
     transcript_text = "\n".join(
         f"[{seg['start']}s - {seg['end']}s]: {seg['text']}"
         for seg in segments
     )
 
+    # Dynamic buffer: at most 10% of video duration, capped at 30s
+    buffer = min(30, video_duration * 0.10)
+    valid_start = round(buffer, 1)
+    valid_end   = round(video_duration - buffer, 1)
+
     prompt = f"""You are an expert video ad placement strategist.
-        Below is a timestamped transcript of a video (total duration: {round(video_duration, 1)} seconds).
-    TRANSCRIPT:
+
+Below is a timestamped transcript of a video (total duration: {round(video_duration, 1)} seconds).
+
+TRANSCRIPT:
 {transcript_text}
 
-Identify the {ad_count} best timestamp(s) to insert a short ad (15-30 seconds).
+YOUR TASK: Return EXACTLY {ad_count} ad timestamp(s). No more, no less. This is mandatory.
 
-Criteria for a good ad timestamp:
-- Natural pauses, topic transitions
-- Low information density (filler, recap, or summary moments)
-- Not in the middle of an important explanation or punchline
-- Spread timestamps evenly across the video duration where possible
+Rules:
+- Only place ads between {valid_start}s and {valid_end}s
+- Prefer natural pauses, topic transitions, or low-information-density moments
+- Spread the timestamps as evenly as possible across the valid window
 - If ideal spots are limited, still return EXACTLY {ad_count} timestamps at the best available positions
 - Each timestamp must be unique (no duplicates)
 
@@ -72,16 +87,44 @@ Respond ONLY with valid JSON, no extra text, no markdown fences:
     }}
   ],
   "summary": "<one sentence about the overall content of the video>"
-}}"""
+}}
+
+Remember: the array MUST contain exactly {ad_count} item(s)."""
 
     message = claude_client.messages.create(
         model="claude-opus-4-5",
-        max_tokens=1024,
+        max_tokens=2048,
         messages=[{"role": "user", "content": prompt}]
     )
 
     response_text = message.content[0].text.strip()
-    return json.loads(response_text)
+    result = json.loads(response_text)
+
+    # Safety net: if Claude still returns wrong count, fill or trim
+    timestamps = result.get("ad_timestamps", [])
+
+    # Trim if too many
+    timestamps = timestamps[:ad_count]
+
+    # Fill if too few by evenly spacing across valid window
+    if len(timestamps) < ad_count:
+        existing_secs = {t["timestamp_seconds"] for t in timestamps}
+        interval = (valid_end - valid_start) / (ad_count + 1)
+        for i in range(1, ad_count + 1):
+            if len(timestamps) >= ad_count:
+                break
+            candidate = round(valid_start + i * interval, 1)
+            # Avoid duplicating existing timestamps (within 5s)
+            if all(abs(candidate - e) > 5 for e in existing_secs):
+                timestamps.append({
+                    "timestamp_seconds": candidate,
+                    "timestamp_formatted": format_timestamp(candidate),
+                    "reason": "Evenly distributed placement across video duration."
+                })
+                existing_secs.add(candidate)
+
+    result["ad_timestamps"] = timestamps
+    return result
 
 
 @app.post("/find-ad-timestamps")
@@ -90,8 +133,6 @@ async def find_ad_timestamps_endpoint(
     ad_count: int = Form(3)
 ):
     ad_count = max(1, min(ad_count, 10))
-
-    print(f"ad_count: {ad_count}")
 
     allowed_types = [
         "video/mp4", "video/quicktime", "video/x-msvideo",
@@ -142,4 +183,5 @@ def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+
